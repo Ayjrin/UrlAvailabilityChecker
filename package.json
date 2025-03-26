@@ -1,0 +1,22 @@
+{
+  "name": "search-me-daddy",
+  "version": "1.0.0",
+  "description": "Domain availability checker using Browserbase",
+  "main": "dist/scrape/scraper.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node scrape/scraper.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@browserbasehq/sdk": "^2.4.0",
+    "@browserbasehq/stagehand": "^1.14.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.11",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.4"
+  }
+}

@@ -1,0 +1,122 @@
+[
+    {
+        "domain": "bigmegachungus.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "example.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "available"
+    },
+    {
+        "domain": "example.com",
+        "status": "error"
+    },
+    {
+        "domain": "ayjrin.com",
+        "status": "error"
+    },
+    {
+        "domain": "ayjrin.dev",
+        "status": "error"
+    },
+    {
+        "domain": "cascadeai.org",
+        "status": "error"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "error"
+    },
+    {
+        "domain": "example.com",
+        "status": "available"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "available"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "example.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "available"
+    },
+    {
+        "domain": "example.com",
+        "status": "unavailable"
+    },
+    {
+        "domain": "ayjrin.com",
+        "status": "unknown"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "error"
+    },
+    {
+        "domain": "example.com",
+        "status": "error"
+    },
+    {
+        "domain": "ayjrin.com",
+        "status": "error"
+    },
+    {
+        "domain": "ayjrin.dev",
+        "status": "error"
+    },
+    {
+        "domain": "cascadeai.org",
+        "status": "error"
+    },
+    {
+        "domain": "stagehand.com",
+        "status": "error"
+    },
+    {
+        "domain": "stagehand.dev",
+        "status": "error"
+    },
+    {
+        "domain": "stagehand.net",
+        "status": "error"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "available"
+    },
+    {
+        "domain": "example.com",
+        "status": "unknown"
+    },
+    {
+        "domain": "bigmegachungus.com",
+        "status": "available"
+    },
+    {
+        "domain": "example.com",
+        "status": "unavailable"
+    }
+]
