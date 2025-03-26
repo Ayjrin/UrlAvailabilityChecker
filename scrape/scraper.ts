@@ -6,86 +6,75 @@
 // }
 import * as fs from 'fs';
 import * as path from 'path';
-import * as z from 'zod';
 import { Browserbase } from '@browserbasehq/sdk';
-import { Stagehand, Page } from '@browserbasehq/stagehand';
-import { BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID } from './config';
+import { Stagehand } from '@browserbasehq/stagehand';
+import { z } from 'zod';
+import { BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID, OPENAI_API_KEY } from './config';
 import { getStagehandConfig } from './stagehand_config';
 
-// Interface for domain data
+// Define the structure of a domain entry
 interface DomainEntry {
   domain: string;
   status: 'available' | 'unavailable' | 'unknown' | 'error';
 }
 
-// Define Zod schema for domain availability extraction
-const domainAvailabilitySchema = z.object({
-  availability: z.enum(['available', 'unavailable']).describe('Whether the domain is available for purchase or not')
-});
-
 // Initialize Browserbase and Stagehand with stealth mode
-const initBrowserbaseAndStagehand = async (): Promise<{ stagehand: Stagehand, sessionId: string }> => {
-  console.log('Initializing Browserbase and Stagehand with stealth mode...');
-  console.log(`Using Browserbase API Key: ${BROWSERBASE_API_KEY.substring(0, 10)}...`);
-  console.log(`Using Browserbase Project ID: ${BROWSERBASE_PROJECT_ID}`);
+const initializeBrowserbaseSession = async (sessionNumber: number): Promise<Stagehand> => {
+  console.log(`Initializing Browserbase and Stagehand session ${sessionNumber} with stealth mode...`);
   
-  try {
-    // Initialize Browserbase
-    const bb = new Browserbase({ apiKey: BROWSERBASE_API_KEY });
-    
-    // Create a session with stealth mode enabled
-    const session = await bb.sessions.create({
-      projectId: BROWSERBASE_PROJECT_ID,
-      browserSettings: {
-        // Configure stealth options to avoid bot detection
-        fingerprint: {
-          browsers: ["chrome"],
-          devices: ["desktop"],
-          locales: ["en-US"],
-          operatingSystems: ["windows"],
-          screen: {
-            maxWidth: 1920,
-            maxHeight: 1080,
-            minWidth: 1024,
-            minHeight: 768,
-          }
-        },
-        viewport: {
-          width: 1920,
-          height: 1080,
-        },
-        solveCaptchas: true,
+  // Create a new Browserbase instance
+  const browserbase = new Browserbase({ apiKey: BROWSERBASE_API_KEY });
+  
+  // Create a new session
+  const session = await browserbase.sessions.create({
+    projectId: BROWSERBASE_PROJECT_ID,
+    browserSettings: {
+      // Configure stealth options to avoid bot detection
+      fingerprint: {
+        browsers: ["chrome"],
+        devices: ["desktop"],
+        locales: ["en-US"],
+        operatingSystems: ["windows"],
+        screen: {
+          maxWidth: 1920,
+          maxHeight: 1080,
+          minWidth: 1024,
+          minHeight: 768,
+        }
       },
-      proxies: true, // Use proxies to avoid IP-based blocking
-    });
-    
-    console.log(`Session created: ${session.id}`);
-    console.log(`Session URL: https://browserbase.com/sessions/${session.id}`);
-    
-    // Initialize Stagehand with the session ID
-    const stagehandConfig = getStagehandConfig(session.id);
-    console.log('Initializing Stagehand with config:', stagehandConfig);
-    
-    const stagehand = new Stagehand({
-      env: "BROWSERBASE",
-      apiKey: BROWSERBASE_API_KEY,
-      projectId: BROWSERBASE_PROJECT_ID,
-      browserbaseSessionID: session.id,
-      modelName: stagehandConfig.modelName as "gpt-4o-mini", 
-      modelClientOptions: stagehandConfig.modelClientOptions,
-      enableCaching: stagehandConfig.enableCaching,
-      verbose: stagehandConfig.verbose as 0
-    });
-    
-    // Initialize Stagehand
-    await stagehand.init();
-    console.log('Stagehand initialized successfully');
-    
-    return { stagehand, sessionId: session.id };
-  } catch (error) {
-    console.error('Error initializing Browserbase and Stagehand:', error);
-    throw error;
-  }
+      viewport: {
+        width: 1920,
+        height: 1080,
+      },
+      solveCaptchas: true,
+    },
+    proxies: true, // Use proxies to avoid IP-based blocking
+  });
+  
+  console.log(`Session ${sessionNumber} created: ${session.id}`);
+  console.log(`Session ${sessionNumber} URL: https://browserbase.com/sessions/${session.id}`);
+  
+  // Configure Stagehand
+  const stagehandConfig = getStagehandConfig(session.id);
+  console.log(`Initializing Stagehand session ${sessionNumber} with config:`, stagehandConfig);
+  
+  // Create a new Stagehand instance
+  const stagehand = new Stagehand({
+    env: "BROWSERBASE",
+    apiKey: BROWSERBASE_API_KEY,
+    projectId: BROWSERBASE_PROJECT_ID,
+    browserbaseSessionID: session.id,
+    modelName: stagehandConfig.modelName as "gpt-4o-mini", 
+    modelClientOptions: stagehandConfig.modelClientOptions,
+    enableCaching: stagehandConfig.enableCaching,
+    verbose: stagehandConfig.verbose as 0
+  });
+  
+  // Initialize Stagehand
+  await stagehand.init();
+  console.log(`Stagehand session ${sessionNumber} initialized successfully`);
+  
+  return stagehand;
 };
 
 // Check domain availability using Name.com
@@ -202,111 +191,251 @@ const checkDomainAvailabilityName = async (
   }
 };
 
-// Check domain availability
-const checkDomainAvailability = async (
-  domain: string, 
-  stagehand: Stagehand,
-  domainData: DomainEntry[],
-  outputFilePath: string
-): Promise<DomainEntry> => {
-  console.log(`Checking domain: ${domain}`);
-  
+// Generic domain availability checker
+const checkDomainAvailability = async (domain: string, stagehand: Stagehand): Promise<DomainEntry['status']> => {
   try {
     // Check domain availability on Name.com
-    const status = await checkDomainAvailabilityName(domain, stagehand);
-    
-    // Add domain and status to our data
-    const domainEntry: DomainEntry = { domain, status };
-    domainData.push(domainEntry);
-    console.log(`Domain ${domain} final status: ${status}`);
-    
-    // Save after each check in case of interruptions
-    fs.writeFileSync(outputFilePath, JSON.stringify(domainData, null, 4));
-    
-    return domainEntry;
+    return await checkDomainAvailabilityName(domain, stagehand);
   } catch (error) {
     console.error(`Error checking domain ${domain}:`, error);
-    const domainEntry: DomainEntry = { domain, status: 'error' };
-    domainData.push(domainEntry);
+    return 'error';
+  }
+};
+
+// Safely read the results file with retries
+const safelyReadResultsFile = async (filePath: string, maxRetries = 3): Promise<DomainEntry[]> => {
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return [];
+      }
+      
+      const content = fs.readFileSync(filePath, 'utf-8');
+      if (!content.trim()) {
+        return [];
+      }
+      
+      return JSON.parse(content);
+    } catch (error) {
+      retries++;
+      console.error(`Error reading results file (attempt ${retries}/${maxRetries}):`, error);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  
+  console.error(`Failed to read results file after ${maxRetries} attempts`);
+  return [];
+};
+
+// Safely write to the results file with retries
+const safelyWriteResultsFile = async (
+  filePath: string, 
+  data: DomainEntry[], 
+  maxRetries = 3
+): Promise<boolean> => {
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      // Ensure the directory exists
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      // Write to a temporary file first
+      const tempFilePath = `${filePath}.tmp`;
+      fs.writeFileSync(tempFilePath, JSON.stringify(data, null, 4));
+      
+      // Rename the temporary file to the actual file (atomic operation)
+      fs.renameSync(tempFilePath, filePath);
+      
+      return true;
+    } catch (error) {
+      retries++;
+      console.error(`Error writing results file (attempt ${retries}/${maxRetries}):`, error);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  
+  console.error(`Failed to write results file after ${maxRetries} attempts`);
+  return false;
+};
+
+// Process a batch of domains with a specific session
+const processDomainBatch = async (
+  domains: string[], 
+  sessionNumber: number,
+  outputPath: string
+): Promise<void> => {
+  let stagehand: Stagehand | null = null;
+  
+  try {
+    // Initialize the session
+    stagehand = await initializeBrowserbaseSession(sessionNumber);
+    console.log(`Stagehand session ${sessionNumber} initialized successfully`);
     
-    // Save after each check in case of interruptions
-    fs.writeFileSync(outputFilePath, JSON.stringify(domainData, null, 4));
-    
-    return domainEntry;
+    // Process each domain in the batch
+    for (const domain of domains) {
+      try {
+        // Read the current results to check if this domain has already been processed
+        const currentResults = await safelyReadResultsFile(outputPath);
+        
+        // Skip if domain has already been checked
+        if (currentResults.some(entry => entry.domain === domain)) {
+          console.log(`Session ${sessionNumber}: Domain ${domain} already checked, skipping...`);
+          continue;
+        }
+        
+        console.log(`Session ${sessionNumber} checking domain: ${domain}`);
+        const status = await checkDomainAvailability(domain, stagehand);
+        
+        // Create a new entry 
+        const newEntry: DomainEntry = {
+          domain,
+          status,
+        };
+        
+        // Read the latest results again (they might have changed)
+        const updatedResults = await safelyReadResultsFile(outputPath);
+        
+        // Check again if the domain has been processed while we were checking
+        if (!updatedResults.some(entry => entry.domain === domain)) {
+          // Add the new entry
+          updatedResults.push(newEntry);
+          
+          // Save the updated results
+          await safelyWriteResultsFile(outputPath, updatedResults);
+          console.log(`Session ${sessionNumber}: Results for ${domain} saved to ${outputPath}`);
+        } else {
+          console.log(`Session ${sessionNumber}: Domain ${domain} was checked by another session while processing, skipping save`);
+        }
+      } catch (domainError) {
+        console.error(`Session ${sessionNumber}: Error processing domain ${domain}:`, domainError);
+        
+        // Try to save the error status
+        try {
+          const currentResults = await safelyReadResultsFile(outputPath);
+          
+          // Only add if not already present
+          if (!currentResults.some(entry => entry.domain === domain)) {
+            currentResults.push({
+              domain,
+              status: 'error',
+            });
+            
+            await safelyWriteResultsFile(outputPath, currentResults);
+          }
+        } catch (saveError) {
+          console.error(`Session ${sessionNumber}: Failed to save error status for ${domain}:`, saveError);
+        }
+      }
+    }
+  } catch (sessionError) {
+    console.error(`Error in session ${sessionNumber}:`, sessionError);
+  } finally {
+    // Clean up the session
+    if (stagehand) {
+      try {
+        await stagehand.close();
+        console.log(`Session ${sessionNumber} closed successfully`);
+      } catch (closeError) {
+        console.error(`Error closing session ${sessionNumber}:`, closeError);
+      }
+    }
   }
 };
 
 // Main function
-const run = async (): Promise<void> => {
-  let stagehand: Stagehand | null = null;
-  
+const run = async () => {
   try {
-    // Initialize Browserbase and Stagehand
-    const { stagehand: initializedStagehand, sessionId } = await initBrowserbaseAndStagehand();
-    stagehand = initializedStagehand;
-    
-    // Read domains from input file
-    // Use absolute paths to ensure we find the files regardless of where the script is run from
+    // Read domains from file - use absolute paths to ensure we find the files
     const projectRoot = path.resolve(__dirname, '..', '..');
-    const inputFilePath = path.join(projectRoot, 'input', 'domains.txt');
-    const outputFilePath = path.join(projectRoot, 'output', 'domain.json');
+    const domainsPath = path.join(projectRoot, 'input', 'domains.txt');
+    const outputPath = path.join(projectRoot, 'output', 'domain.json');
     
-    // Ensure output directory exists
-    const outputDir = path.join(projectRoot, 'output');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    console.log(`Project root: ${projectRoot}`);
+    console.log(`Domains path: ${domainsPath}`);
+    console.log(`Output path: ${outputPath}`);
     
-    // Initialize or load existing domain data
-    let domainData: DomainEntry[] = [];
-    if (fs.existsSync(outputFilePath) && fs.statSync(outputFilePath).size > 0) {
-      try {
-        domainData = JSON.parse(fs.readFileSync(outputFilePath, 'utf8'));
-      } catch (e) {
-        // If file exists but is not valid JSON, start with empty array
-        console.error('Error parsing existing domain data:', e);
-        domainData = [];
-      }
-    }
-    
-    // Read domains from input file
-    if (!fs.existsSync(inputFilePath)) {
-      console.error(`Input file not found: ${inputFilePath}`);
-      throw new Error(`Input file not found: ${inputFilePath}`);
-    }
-    
-    const domainsText = fs.readFileSync(inputFilePath, 'utf8');
-    const domains = domainsText
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-      // Remove duplicates
-      .filter((domain, index, self) => self.indexOf(domain) === index);
-    
-    if (domains.length === 0) {
-      console.warn('No domains found in the input file. Nothing to check.');
+    if (!fs.existsSync(domainsPath)) {
+      console.error(`Domains file not found: ${domainsPath}`);
       return;
     }
     
-    console.log(`Found ${domains.length} domains to check: ${domains.join(', ')}`);
+    const domainsContent = fs.readFileSync(domainsPath, 'utf-8');
     
-    // Process each domain
-    for (const domain of domains) {
-      await checkDomainAvailability(domain, stagehand, domainData, outputFilePath);
+    // Split by newline and filter out empty lines
+    const allDomains = domainsContent
+      .split('\n')
+      .map(d => d.trim())
+      .filter(d => d.length > 0);
+    
+    // Remove duplicates
+    const uniqueDomains = [...new Set(allDomains)];
+    
+    if (uniqueDomains.length === 0) {
+      console.log('No domains found in the input file');
+      return;
     }
     
-    console.log(`All domains checked. Results saved to ${outputFilePath}`);
-    console.log(`View the session replay at https://browserbase.com/sessions/${sessionId}`);
+    console.log(`Found ${uniqueDomains.length} domains to check:`, uniqueDomains.join(', '));
+    
+    // Read existing results
+    const existingResults = await safelyReadResultsFile(outputPath);
+    console.log(`Loaded ${existingResults.length} existing results`);
+    
+    // Filter out domains that have already been checked
+    const domainsToCheck = uniqueDomains.filter(
+      domain => !existingResults.some(entry => entry.domain === domain)
+    );
+    
+    console.log(`${domainsToCheck.length} domains need to be checked`);
+    
+    if (domainsToCheck.length === 0) {
+      console.log('All domains have already been checked');
+      return;
+    }
+    
+    // Determine how many sessions to use (up to 3)
+    const numberOfSessions = Math.min(3, domainsToCheck.length);
+    console.log(`Using ${numberOfSessions} parallel sessions`);
+    
+    // Distribute domains evenly across sessions
+    const domainBatches: string[][] = Array.from({ length: numberOfSessions }, () => []);
+    
+    domainsToCheck.forEach((domain, index) => {
+      const sessionIndex = index % numberOfSessions;
+      domainBatches[sessionIndex].push(domain);
+    });
+    
+    // Log the distribution
+    domainBatches.forEach((batch, index) => {
+      console.log(`Session ${index + 1} will check ${batch.length} domains`);
+    });
+    
+    // Process all batches in parallel
+    await Promise.all(
+      domainBatches.map((batch, index) => 
+        processDomainBatch(batch, index + 1, outputPath)
+      )
+    );
+    
+    console.log('All domains have been checked');
     
   } catch (error) {
-    console.error('Error in domain checking process:', error);
-  } finally {
-    // Clean up
-    if (stagehand) {
-      await stagehand.close();
-    }
+    console.error('Error in main function:', error);
   }
 };
 
-// Run the script
-run().catch(console.error);
+// Run the main function
+run().catch(error => {
+  console.error('Unhandled error in main function:', error);
+  process.exit(1);
+});
