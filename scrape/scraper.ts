@@ -281,14 +281,17 @@ const processDomainBatch = async (
     stagehand = await initializeBrowserbaseSession(sessionNumber);
     console.log(`Stagehand session ${sessionNumber} initialized successfully`);
     
+    // Read the current results once at the start to get a baseline
+    let currentResults = await safelyReadResultsFile(outputPath);
+    let checkedDomainsSet = new Set(currentResults.map(entry => entry.domain));
+    
+    console.log(`Session ${sessionNumber}: Starting with ${checkedDomainsSet.size} already checked domains`);
+    
     // Process each domain in the batch
     for (const domain of domains) {
       try {
-        // Read the current results to check if this domain has already been processed
-        const currentResults = await safelyReadResultsFile(outputPath);
-        
-        // Skip if domain has already been checked
-        if (currentResults.some(entry => entry.domain === domain)) {
+        // Skip if domain has already been checked (double-check in case another session added it)
+        if (checkedDomainsSet.has(domain)) {
           console.log(`Session ${sessionNumber}: Domain ${domain} already checked, skipping...`);
           continue;
         }
@@ -303,16 +306,20 @@ const processDomainBatch = async (
         };
         
         // Read the latest results again (they might have changed)
-        const updatedResults = await safelyReadResultsFile(outputPath);
+        currentResults = await safelyReadResultsFile(outputPath);
+        checkedDomainsSet = new Set(currentResults.map(entry => entry.domain));
         
         // Check again if the domain has been processed while we were checking
-        if (!updatedResults.some(entry => entry.domain === domain)) {
+        if (!checkedDomainsSet.has(domain)) {
           // Add the new entry
-          updatedResults.push(newEntry);
+          currentResults.push(newEntry);
           
           // Save the updated results
-          await safelyWriteResultsFile(outputPath, updatedResults);
+          await safelyWriteResultsFile(outputPath, currentResults);
           console.log(`Session ${sessionNumber}: Results for ${domain} saved to ${outputPath}`);
+          
+          // Update our local set
+          checkedDomainsSet.add(domain);
         } else {
           console.log(`Session ${sessionNumber}: Domain ${domain} was checked by another session while processing, skipping save`);
         }
@@ -321,16 +328,18 @@ const processDomainBatch = async (
         
         // Try to save the error status
         try {
-          const currentResults = await safelyReadResultsFile(outputPath);
+          currentResults = await safelyReadResultsFile(outputPath);
+          checkedDomainsSet = new Set(currentResults.map(entry => entry.domain));
           
           // Only add if not already present
-          if (!currentResults.some(entry => entry.domain === domain)) {
+          if (!checkedDomainsSet.has(domain)) {
             currentResults.push({
               domain,
               status: 'error',
             });
             
             await safelyWriteResultsFile(outputPath, currentResults);
+            checkedDomainsSet.add(domain);
           }
         } catch (saveError) {
           console.error(`Session ${sessionNumber}: Failed to save error status for ${domain}:`, saveError);
@@ -385,21 +394,22 @@ const run = async () => {
       return;
     }
     
-    console.log(`Found ${uniqueDomains.length} domains to check:`, uniqueDomains.join(', '));
+    console.log(`Found ${uniqueDomains.length} unique domains in input file`);
     
     // Read existing results
     const existingResults = await safelyReadResultsFile(outputPath);
-    console.log(`Loaded ${existingResults.length} existing results`);
+    console.log(`Loaded ${existingResults.length} existing results from output file`);
+    
+    // Create a Set of already checked domains for O(1) lookup
+    const checkedDomainsSet = new Set(existingResults.map(entry => entry.domain));
+    console.log(`${checkedDomainsSet.size} domains have already been checked`);
     
     // Filter out domains that have already been checked
-    const domainsToCheck = uniqueDomains.filter(
-      domain => !existingResults.some(entry => entry.domain === domain)
-    );
+    const domainsToCheck = uniqueDomains.filter(domain => !checkedDomainsSet.has(domain));
     
     console.log(`${domainsToCheck.length} domains need to be checked`);
-    
     if (domainsToCheck.length === 0) {
-      console.log('All domains have already been checked');
+      console.log('All domains have already been checked. Nothing to do.');
       return;
     }
     
@@ -417,7 +427,7 @@ const run = async () => {
     
     // Log the distribution
     domainBatches.forEach((batch, index) => {
-      console.log(`Session ${index + 1} will check ${batch.length} domains`);
+      console.log(`Session ${index + 1} will check ${batch.length} domains: ${batch.join(', ')}`);
     });
     
     // Process all batches in parallel
