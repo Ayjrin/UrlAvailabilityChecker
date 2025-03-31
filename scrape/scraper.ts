@@ -119,7 +119,7 @@ const checkDomainAvailabilityName = async (
       });
       
       const extractResult = await stagehand.page.extract({
-        instruction: "Check if this domain is available for purchase on name.com. Available domains will have text like 'is a great choice' and an 'Add to Cart' button. Unavailable domains will have text like 'is taken' or a 'Make Offer' button.",
+        instruction: "Determine if this domain is available for purchase on name.com. IMPORTANT: A domain is AVAILABLE only if it shows 'Add To Cart' button AND text saying it 'is a great choice'. A domain is UNAVAILABLE if it shows 'Make Offer' button OR text saying it 'is taken'. Look carefully at the entire page for these specific elements before deciding.",
         schema: domainAvailabilitySchema,
         useTextExtract: true
       });
@@ -162,7 +162,7 @@ const checkDomainAvailabilityName = async (
           const pageContent = await stagehand.page.content();
           const lowerPageContent = pageContent.toLowerCase();
           
-          if (lowerPageContent.includes('is a great choice') || lowerPageContent.includes('add to cart')) {
+          if (lowerPageContent.includes('is a great choice') && lowerPageContent.includes('add to cart')) {
             return 'available';
           }
           
@@ -208,16 +208,48 @@ const safelyReadResultsFile = async (filePath: string, maxRetries = 3): Promise<
   
   while (retries < maxRetries) {
     try {
+      // Check if file exists
       if (!fs.existsSync(filePath)) {
+        console.log(`Results file does not exist yet at ${filePath}, creating empty array`);
+        
+        // Ensure the directory exists
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+          console.log(`Created directory: ${dir}`);
+        }
+        
+        // Create an empty file
+        fs.writeFileSync(filePath, JSON.stringify([], null, 4));
         return [];
       }
       
-      const content = fs.readFileSync(filePath, 'utf-8');
-      if (!content.trim()) {
+      // Read the file
+      const data = fs.readFileSync(filePath, 'utf-8');
+      
+      // Handle empty file case
+      if (!data.trim()) {
+        console.log(`Results file at ${filePath} is empty, returning empty array`);
         return [];
       }
       
-      return JSON.parse(content);
+      try {
+        // Parse the JSON
+        const results = JSON.parse(data) as DomainEntry[];
+        console.log(`Successfully read ${results.length} entries from ${filePath}`);
+        return results;
+      } catch (parseError) {
+        console.error(`Error parsing JSON from ${filePath}:`, parseError);
+        
+        // If the file is corrupted, create a backup and return empty array
+        const backupPath = `${filePath}.backup.${Date.now()}`;
+        fs.copyFileSync(filePath, backupPath);
+        console.log(`Created backup of corrupted file at ${backupPath}`);
+        
+        // Create a new empty file
+        fs.writeFileSync(filePath, JSON.stringify([], null, 4));
+        return [];
+      }
     } catch (error) {
       retries++;
       console.error(`Error reading results file (attempt ${retries}/${maxRetries}):`, error);
@@ -245,14 +277,24 @@ const safelyWriteResultsFile = async (
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
+        console.log(`Created directory for results: ${dir}`);
+      }
+      
+      // Create a backup of the existing file if it exists
+      if (fs.existsSync(filePath)) {
+        const backupPath = `${filePath}.backup`;
+        fs.copyFileSync(filePath, backupPath);
+        console.log(`Created backup of existing results at ${backupPath}`);
       }
       
       // Write to a temporary file first
       const tempFilePath = `${filePath}.tmp`;
       fs.writeFileSync(tempFilePath, JSON.stringify(data, null, 4));
+      console.log(`Wrote ${data.length} entries to temporary file ${tempFilePath}`);
       
       // Rename the temporary file to the actual file (atomic operation)
       fs.renameSync(tempFilePath, filePath);
+      console.log(`Successfully renamed temporary file to ${filePath}`);
       
       return true;
     } catch (error) {
@@ -260,7 +302,7 @@ const safelyWriteResultsFile = async (
       console.error(`Error writing results file (attempt ${retries}/${maxRetries}):`, error);
       
       // Wait before retrying
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000 * retries));
     }
   }
   
@@ -364,44 +406,66 @@ const processDomainBatch = async (
 // Main function
 const run = async () => {
   try {
-    // Read domains from file - use absolute paths to ensure we find the files
-    const projectRoot = path.resolve(__dirname, '..', '..');
-    const domainsPath = path.join(projectRoot, 'input', 'domains.txt');
-    const outputPath = path.join(projectRoot, 'output', 'domain.json');
-    
+    // Get the project root directory
+    const projectRoot = path.resolve(__dirname, '..');
     console.log(`Project root: ${projectRoot}`);
+    
+    // Define input and output paths
+    const inputDir = path.join(projectRoot, 'input');
+    const outputDir = path.join(projectRoot, 'output');
+    
+    // Ensure directories exist
+    if (!fs.existsSync(inputDir)) {
+      console.log(`Creating input directory: ${inputDir}`);
+      fs.mkdirSync(inputDir, { recursive: true });
+    }
+    
+    if (!fs.existsSync(outputDir)) {
+      console.log(`Creating output directory: ${outputDir}`);
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    
+    const domainsPath = path.join(inputDir, 'domains.txt');
+    const outputPath = path.join(outputDir, 'domain.json');
+    
     console.log(`Domains path: ${domainsPath}`);
     console.log(`Output path: ${outputPath}`);
     
+    // Read domains from file
     if (!fs.existsSync(domainsPath)) {
-      console.error(`Domains file not found: ${domainsPath}`);
+      console.log(`Domains file not found: ${domainsPath}`);
       return;
     }
     
     const domainsContent = fs.readFileSync(domainsPath, 'utf-8');
+    const domains = domainsContent.split('\n').map(d => d.trim()).filter(Boolean);
     
-    // Split by newline and filter out empty lines
-    const allDomains = domainsContent
-      .split('\n')
-      .map(d => d.trim())
-      .filter(d => d.length > 0);
-    
-    // Remove duplicates
-    const uniqueDomains = [...new Set(allDomains)];
-    
-    if (uniqueDomains.length === 0) {
+    if (domains.length === 0) {
       console.log('No domains found in the input file');
       return;
     }
     
+    // Remove duplicates
+    const uniqueDomains = [...new Set(domains)];
     console.log(`Found ${uniqueDomains.length} unique domains in input file`);
     
     // Read existing results
     const existingResults = await safelyReadResultsFile(outputPath);
-    console.log(`Loaded ${existingResults.length} existing results from output file`);
+    console.log(`Successfully read ${existingResults.length} entries from ${outputPath}`);
+    
+    // Filter out domains with error status so they can be retried
+    const validResults = existingResults.filter(entry => entry.status !== 'error');
+    
+    if (validResults.length < existingResults.length) {
+      console.log(`Removed ${existingResults.length - validResults.length} domains with error status for retry`);
+      
+      // Save the filtered results back to the file
+      await safelyWriteResultsFile(outputPath, validResults);
+      console.log(`Updated results file with ${validResults.length} valid entries`);
+    }
     
     // Create a Set of already checked domains for O(1) lookup
-    const checkedDomainsSet = new Set(existingResults.map(entry => entry.domain));
+    const checkedDomainsSet = new Set(validResults.map(entry => entry.domain));
     console.log(`${checkedDomainsSet.size} domains have already been checked`);
     
     // Filter out domains that have already been checked
@@ -427,7 +491,7 @@ const run = async () => {
     
     // Log the distribution
     domainBatches.forEach((batch, index) => {
-      console.log(`Session ${index + 1} will check ${batch.length} domains: ${batch.join(', ')}`);
+      console.log(`Session ${index + 1} will check ${batch.length} domains`);
     });
     
     // Process all batches in parallel
